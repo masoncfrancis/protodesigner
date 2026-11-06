@@ -1,4 +1,4 @@
-import httpx
+from openai import AsyncOpenAI, OpenAIError
 
 from app.config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
 from app.models import ChatRequest
@@ -37,21 +37,19 @@ async def complete_chat(request: ChatRequest) -> str:
     ]
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                f"{OPENAI_BASE_URL}/chat/completions",
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                json={"model": OPENAI_MODEL, "messages": messages, "temperature": 0.7},
+        async with AsyncOpenAI(
+            api_key=OPENAI_API_KEY,
+            base_url=OPENAI_BASE_URL,
+            timeout=60,
+        ) as client:
+            response = await client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=messages,
+                temperature=0.7,
             )
-            response.raise_for_status()
-    except httpx.HTTPError as error:
+    except OpenAIError as error:
         raise LLMUpstreamError("LLM request failed") from error
 
-    try:
-        content = response.json()["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as error:
-        raise LLMUpstreamError("LLM returned an unexpected response") from error
-
-    if not isinstance(content, str) or not content.strip():
+    if not response.choices or not response.choices[0].message.content:
         raise LLMUpstreamError("LLM returned an empty response")
-    return content.strip()
+    return response.choices[0].message.content.strip()
