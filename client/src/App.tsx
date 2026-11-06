@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
+import { sendChat } from './lib/llmClient'
 
 type Message = {
   id: number
@@ -52,6 +53,8 @@ function App() {
   const [messages, setMessages] = useState(initialMessages)
   const [input, setInput] = useState('')
   const [darkMode, setDarkMode] = useState(true)
+  const [isSending, setIsSending] = useState(false)
+  const [error, setError] = useState('')
   const [activeStage, setActiveStage] = useState(0)
   const [summary, setSummary] = useState({
     purpose: 'Waiting for your idea',
@@ -60,33 +63,43 @@ function App() {
     form: 'Not defined yet',
   })
 
-  const addMessage = (text: string) => {
+  const addMessage = async (text: string) => {
     if (!text.trim()) return
 
-    const nextStage = Math.min(activeStage + 1, stages.length - 1)
-    setMessages((current) => [
-      ...current,
-      { id: Date.now(), role: 'user', text: text.trim() },
-      {
-        id: Date.now() + 1,
-        role: 'assistant',
-        text: prompts[nextStage]?.text ?? 'Great. Is there anything about the physical design that must not change?',
-      },
-    ])
-    setActiveStage(nextStage)
-    setSummary((current) => ({
-      ...current,
-      ...(activeStage === 0 ? { purpose: text.trim() } : {}),
-      ...(activeStage === 1 ? { context: text.trim() } : {}),
-      ...(activeStage === 2 ? { internals: text.trim() } : {}),
-      ...(activeStage === 3 ? { form: text.trim() } : {}),
-    }))
+    const trimmedText = text.trim()
+    const userMessage = { id: Date.now(), role: 'user' as const, text: trimmedText }
+    const history = [...messages, userMessage]
+    const nextSummary = {
+      ...summary,
+      ...(activeStage === 0 ? { purpose: trimmedText } : {}),
+      ...(activeStage === 1 ? { context: trimmedText } : {}),
+      ...(activeStage === 2 ? { internals: trimmedText } : {}),
+      ...(activeStage === 3 ? { form: trimmedText } : {}),
+    }
+    setMessages((current) => [...current, userMessage])
+    setIsSending(true)
+    setError('')
+    setSummary(nextSummary)
     setInput('')
+
+    try {
+      const reply = await sendChat({
+        messages: history.map(({ role, text: content }) => ({ role, content })),
+        stage: stages[activeStage],
+        summary: nextSummary,
+      })
+      setMessages((current) => [...current, { id: Date.now(), role: 'assistant', text: reply }])
+      setActiveStage((current) => Math.min(current + 1, stages.length - 1))
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Could not reach the design guide')
+    } finally {
+      setIsSending(false)
+    }
   }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    addMessage(input)
+    void addMessage(input)
   }
 
   const currentPrompt = prompts[Math.min(activeStage, prompts.length - 1)]
@@ -150,17 +163,19 @@ function App() {
                 </div>
               </div>
             ))}
+            {isSending && <div className="typing-indicator"><div className="mini-avatar">✦</div><span>Design guide is thinking…</span></div>}
             <div className="suggestion-block">
               <p>Or pick a starting point</p>
               <div className="suggestions">
-                {currentPrompt.suggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => addMessage(suggestion)}>{suggestion}<span>↗</span></button>)}
+                {currentPrompt.suggestions.map((suggestion) => <button type="button" key={suggestion} disabled={isSending} onClick={() => addMessage(suggestion)}>{suggestion}<span>↗</span></button>)}
               </div>
             </div>
           </div>
 
+          {error && <div className="chat-error" role="alert">{error} <button type="button" onClick={() => setError('')}>Dismiss</button></div>}
           <form className="composer" onSubmit={handleSubmit}>
-            <textarea value={input} onChange={(event) => setInput(event.target.value)} placeholder="Describe your product idea..." rows={1} aria-label="Your message" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); addMessage(input) } }} />
-            <div className="composer-actions"><button type="button" className="attach-button" aria-label="Attach a file">＋</button><span>Shift + Enter for new line</span><button type="submit" className="send-button" aria-label="Send message">↑</button></div>
+            <textarea disabled={isSending} value={input} onChange={(event) => setInput(event.target.value)} placeholder={isSending ? 'Waiting for the design guide…' : 'Describe your product idea...'} rows={1} aria-label="Your message" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void addMessage(input) } }} />
+            <div className="composer-actions"><button type="button" className="attach-button" aria-label="Attach a file">＋</button><span>Shift + Enter for new line</span><button disabled={isSending} type="submit" className="send-button" aria-label="Send message">↑</button></div>
           </form>
         </section>
 
