@@ -51,7 +51,7 @@ const initialMessages: Message[] = [
 function App() {
   const [messages, setMessages] = useState(initialMessages)
   const [input, setInput] = useState('')
-  const [darkMode, setDarkMode] = useState(false)
+  const [darkMode, setDarkMode] = useState(true)
   const [activeStage, setActiveStage] = useState(0)
   const [summary, setSummary] = useState({
     purpose: 'Waiting for your idea',
