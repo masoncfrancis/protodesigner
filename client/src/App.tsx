@@ -51,6 +51,7 @@ const initialMessages: Message[] = [
 function App() {
   const [messages, setMessages] = useState(initialMessages)
   const [input, setInput] = useState('')
+  const [darkMode, setDarkMode] = useState(false)
   const [activeStage, setActiveStage] = useState(0)
   const [summary, setSummary] = useState({
     purpose: 'Waiting for your idea',
@@ -91,7 +92,7 @@ function App() {
   const currentPrompt = prompts[Math.min(activeStage, prompts.length - 1)]
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${darkMode ? 'dark' : ''}`}>
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" aria-hidden="true">✦</div>
@@ -101,7 +102,9 @@ function App() {
         <div className="top-actions">
           <button className="icon-button" type="button" aria-label="Help">?</button>
           <button className="save-button" type="button"><span className="save-dot" /> Saved</button>
-          <button className="avatar" type="button" aria-label="Open profile">M</button>
+          <button className="theme-toggle" type="button" onClick={() => setDarkMode((current) => !current)} aria-label={`Switch to ${darkMode ? 'light' : 'dark'} mode`}>
+            {darkMode ? '☼ Light' : '☾ Dark'}
+          </button>
         </div>
       </header>
 
