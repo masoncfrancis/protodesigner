@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
-import { sendChat } from './lib/llmClient'
+import { draftPrototypeBrief, generateConceptImage, sendChat } from './lib/llmClient'
+import type { PrototypeBrief } from './lib/llmClient'
 
 type Message = {
   id: number
@@ -49,6 +50,22 @@ const initialMessages: Message[] = [
   },
 ]
 
+const briefFields: { key: keyof PrototypeBrief; label: string }[] = [
+  { key: 'product_overview', label: 'Product overview' },
+  { key: 'primary_user', label: 'Primary user' },
+  { key: 'usage_context', label: 'Use environment' },
+  { key: 'core_functionality', label: 'Core functionality' },
+  { key: 'internal_components', label: 'Electronics inside' },
+  { key: 'approximate_size', label: 'Approximate size' },
+  { key: 'form_factor_and_ergonomics', label: 'Form and ergonomics' },
+  { key: 'controls_and_indicators', label: 'Controls and indicators' },
+  { key: 'ports_and_connectors', label: 'Ports and connectors' },
+  { key: 'materials_and_finish', label: 'Materials and finish' },
+  { key: 'build_constraints', label: 'Build constraints' },
+  { key: 'environment_and_durability', label: 'Durability' },
+  { key: 'visual_direction', label: 'Visual direction' },
+]
+
 function App() {
   const [messages, setMessages] = useState(initialMessages)
   const [input, setInput] = useState('')
@@ -62,6 +79,16 @@ function App() {
     internals: 'Not defined yet',
     form: 'Not defined yet',
   })
+  const [visualizationOpen, setVisualizationOpen] = useState(false)
+  const [isPreparingBrief, setIsPreparingBrief] = useState(false)
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false)
+  const [visualizationError, setVisualizationError] = useState('')
+  const [briefDraft, setBriefDraft] = useState<PrototypeBrief | null>(null)
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (imageUrl) return () => URL.revokeObjectURL(imageUrl)
+  }, [imageUrl])
 
   const addMessage = async (text: string) => {
     if (!text.trim()) return
@@ -102,6 +129,38 @@ function App() {
     void addMessage(input)
   }
 
+  const startVisualization = async () => {
+    setVisualizationOpen(true)
+    setIsPreparingBrief(true)
+    setVisualizationError('')
+    setBriefDraft(null)
+    setImageUrl(null)
+    try {
+      setBriefDraft(await draftPrototypeBrief({
+        messages: messages.map(({ role, text: content }) => ({ role, content })),
+        stage: stages[activeStage],
+        summary,
+      }))
+    } catch (requestError) {
+      setVisualizationError(requestError instanceof Error ? requestError.message : 'Could not prepare prototype brief')
+    } finally {
+      setIsPreparingBrief(false)
+    }
+  }
+
+  const createConceptImage = async () => {
+    if (!briefDraft) return
+    setIsGeneratingImage(true)
+    setVisualizationError('')
+    try {
+      setImageUrl(URL.createObjectURL(await generateConceptImage(briefDraft)))
+    } catch (requestError) {
+      setVisualizationError(requestError instanceof Error ? requestError.message : 'Could not generate concept image')
+    } finally {
+      setIsGeneratingImage(false)
+    }
+  }
+
   const currentPrompt = prompts[Math.min(activeStage, prompts.length - 1)]
 
   return (
@@ -115,6 +174,7 @@ function App() {
         <div className="top-actions">
           <button className="icon-button" type="button" aria-label="Help">?</button>
           <button className="save-button" type="button"><span className="save-dot" /> Saved</button>
+          <button className="visualize-top-button" type="button" disabled={isSending || isPreparingBrief} onClick={() => void startVisualization()}>Visualize idea <span>↗</span></button>
           <button className="theme-toggle" type="button" onClick={() => setDarkMode((current) => !current)} aria-label={`Switch to ${darkMode ? 'light' : 'dark'} mode`}>
             {darkMode ? '☼ Light' : '☾ Dark'}
           </button>
@@ -188,10 +248,37 @@ function App() {
             <SummaryItem label="Inside the box" value={summary.internals} icon="▣" />
             <SummaryItem label="Physical direction" value={summary.form} icon="◇" />
           </div>
-          <div className="next-step"><span className="next-icon">↗</span><div><p className="eyebrow">Up next</p><strong>Define the enclosure</strong><p>Dimensions, controls, materials, and finish.</p></div></div>
-          <button className="continue-button" type="button" onClick={() => setActiveStage(Math.min(activeStage + 1, stages.length - 1))}>Continue discovery <span>→</span></button>
+          <div className="next-step"><span className="next-icon">✦</span><div><p className="eyebrow">Ready when you are</p><strong>Turn your idea into a visual</strong><p>You can generate a concept now, even if some details are still open.</p></div></div>
+          <button className="continue-button" type="button" disabled={isSending || isPreparingBrief} onClick={() => void startVisualization()}>Review brief & visualize <span>→</span></button>
         </aside>
       </div>
+
+      {visualizationOpen && <div className="visualize-backdrop">
+        <section className="visualize-dialog" role="dialog" aria-modal="true" aria-labelledby="visualize-title">
+          <header className="visualize-dialog-header">
+            <div><p className="eyebrow">From conversation to concept</p><h2 id="visualize-title">Review your prototype brief</h2></div>
+            <button type="button" className="dialog-close" aria-label="Close" onClick={() => { setVisualizationOpen(false); setImageUrl(null) }}>×</button>
+          </header>
+          <p className="visualize-intro">Check or edit what the design guide gathered. Missing details stay marked as unspecified; they won’t block image generation.</p>
+          {isPreparingBrief && <div className="visualize-loading"><span className="loading-orbit" />Preparing your brief…</div>}
+          {!isPreparingBrief && briefDraft && !imageUrl && <div className="brief-editor">
+            {briefFields.map(({ key, label }) => <label className="brief-field" key={key}>
+              <span>{label}</span>
+              <textarea value={briefDraft[key]} rows={2} onChange={(event) => setBriefDraft((current) => current ? { ...current, [key]: event.target.value } : current)} />
+            </label>)}
+          </div>}
+          {isGeneratingImage && <div className="visualize-loading"><span className="loading-orbit" />Generating concept image with Gemini…</div>}
+          {imageUrl && <div className="generated-image-wrap"><img src={imageUrl} alt="Generated concept for your electronic product prototype" /><p>AI-generated concept image · Use as a starting point, not a manufacturing specification.</p></div>}
+          {visualizationError && <p className="visualize-error" role="alert">{visualizationError}</p>}
+          <footer className="visualize-footer">
+            <button type="button" className="dialog-secondary" onClick={() => { setVisualizationOpen(false); setImageUrl(null) }}>Back to chat</button>
+            {imageUrl && <a className="dialog-secondary download-image" href={imageUrl} download="protodesigner-concept.png">Download image</a>}
+            {imageUrl && <button type="button" className="dialog-secondary" onClick={() => setImageUrl(null)}>Edit brief</button>}
+            {briefDraft && <button type="button" className="dialog-primary" disabled={isPreparingBrief || isGeneratingImage} onClick={() => void createConceptImage()}>{isGeneratingImage ? 'Generating…' : imageUrl ? 'Generate another' : 'Generate concept image'} <span>→</span></button>}
+            {!briefDraft && !isPreparingBrief && <button type="button" className="dialog-primary" disabled={isPreparingBrief} onClick={() => void startVisualization()}>Retry brief <span>→</span></button>}
+          </footer>
+        </section>
+      </div>}
     </main>
   )
 }
