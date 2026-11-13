@@ -2,7 +2,6 @@ import base64
 import logging
 
 from google import genai
-from google.genai.errors import APIError
 
 from app.config import GEMINI_API_KEY, GEMINI_IMAGE_MODEL
 from app.models import PrototypeBrief
@@ -23,27 +22,29 @@ async def generate_concept_image(brief: PrototypeBrief) -> tuple[bytes, str]:
         raise GeminiConfigurationError("Gemini image credentials are not configured")
 
     prompt = f"""Create one photorealistic industrial-design concept image of this electronic
-product prototype. Treat the approved brief as source of truth. Keep the enclosure physically
-plausible and make visible controls, ports, materials, and scale consistent with the brief.
-Do not add unsupported features or text labels. Show one complete product, centered, in a
-clean studio product-photography setup with soft neutral background and clear form details.
+product enclosure. The approved brief is the source of truth. Prioritize its silhouette,
+proportions, physical scale, orientation, ergonomics, surface treatment, color, seams, and
+construction. Use purpose and electronics only to make the physical design plausible. Keep
+visible controls, indicators, and ports exactly consistent with the brief; do not invent
+features, add screens or labels unless specified, or turn the image into a functional diagram.
+Show one complete prototype, centered, in a clean studio product-photography setup with a
+soft neutral background and clear enclosure details.
 
 Approved prototype brief:
 {brief.model_dump_json(indent=2)}"""
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    client = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options={"api_version": "v1beta"},
+    )
     try:
         interaction = await client.aio.interactions.create(
             model=GEMINI_IMAGE_MODEL,
             input=prompt,
-            response_modalities=["IMAGE"],
+            response_modalities=["image"],
         )
-    except APIError as error:
-        logger.error(
-            "Gemini image request failed: status=%s message=%s",
-            getattr(error, "code", "unknown"),
-            getattr(error, "message", type(error).__name__),
-        )
+    except Exception as error:
+        logger.error("Gemini image request failed: %s: %s", type(error).__name__, error)
         raise GeminiUpstreamError("Image generation failed") from error
     finally:
         await client.aio.aclose()

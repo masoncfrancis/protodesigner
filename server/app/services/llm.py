@@ -8,19 +8,22 @@ from app.models import BriefRequest, ChatRequest, PrototypeBrief
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are ProtoDesigner, a thoughtful product discovery guide.
-Help the user turn an electronic product idea into a thorough physical prototype brief.
-Ask one focused question at a time. Prioritize purpose, context, electronics, dimensions,
-ergonomics, controls, ports, materials, finish, manufacturing constraints, and durability.
-Keep responses concise, practical, and easy for a non-engineer to answer. Use the current
-stage and summary as context, but do not repeat information the user already provided.
-Ask only useful, unanswered questions. Never require more answers before visualization;
-the user can choose to visualize at any time. When enough is known, summarize and invite
-them to review the brief."""
+Help the user define the physical form of an electronic prototype. Function is brief context,
+not the main topic; explore it only when it changes enclosure shape, size, controls, or layout.
+Focus on silhouette, proportions, dimensions, orientation and placement, handling, visible
+controls and ports, materials, color, seams, construction, and internal fit constraints.
+Ask one focused, unanswered physical-design question at a time, using the current stage.
+Keep replies concise and easy for a non-engineer. Never require more answers before
+visualization; the user can choose to visualize at any time. At the Build stage, do not ask
+another question: briefly reflect the physical direction and invite brief review or visualization."""
 
-BRIEF_INSTRUCTIONS = """Create a concise physical prototype brief from the conversation and current
-summary. Preserve known specifics. For any detail the user has not provided, write
-\"Not specified\" rather than inventing it. Return all fields in the required schema.
-This brief will be reviewed and edited by the user before image generation."""
+BRIEF_INSTRUCTIONS = """Create a physical-design brief from the conversation and current summary.
+Prioritize enclosure form, silhouette, proportions, scale, placement, ergonomics, interface
+layout, materials, finish, and construction. Describe product purpose in one short line only;
+do not expand it into a functional specification. Treat electronics and use context only as
+constraints on physical design. Preserve known specifics. For any detail not provided, write
+\"Not specified\" rather than inventing it. Return every field in the required schema. The
+user will review and edit this brief before image generation."""
 
 
 class LLMConfigurationError(Exception):
@@ -39,7 +42,7 @@ async def complete_chat(request: ChatRequest) -> str:
 
     context = (
         f"Current discovery stage: {request.stage}\n"
-        f"Prototype summary: {request.summary.model_dump_json()}"
+        f"Physical design summary: {request.summary.model_dump_json()}"
     )
     input_items = [
         {"role": message.role, "content": message.content}
@@ -82,7 +85,7 @@ async def draft_prototype_brief(request: BriefRequest) -> PrototypeBrief:
 
     context = (
         f"Current discovery stage: {request.stage}\n"
-        f"Current summary: {request.summary.model_dump_json()}"
+        f"Current physical-design summary: {request.summary.model_dump_json()}"
     )
     try:
         async with AsyncOpenAI(

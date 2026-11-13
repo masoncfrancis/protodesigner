@@ -9,10 +9,11 @@ class ChatMessage(BaseModel):
 
 
 class PrototypeSummary(BaseModel):
-    purpose: str
-    context: str
-    internals: str
-    form: str
+    overall_form: str
+    size_and_placement: str
+    interaction_and_controls: str
+    materials_and_finish: str
+    build_constraints: str
 
 
 class ChatRequest(BaseModel):
@@ -34,18 +35,18 @@ class BriefRequest(BaseModel):
 class PrototypeBrief(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    product_overview: str
-    primary_user: str
-    usage_context: str
-    core_functionality: str
-    internal_components: str
-    approximate_size: str
-    form_factor_and_ergonomics: str
+    product_purpose: str
+    overall_form_and_silhouette: str
+    size_and_proportions: str
+    orientation_and_placement: str
+    handling_and_ergonomics: str
+    internal_fit_constraints: str
     controls_and_indicators: str
     ports_and_connectors: str
     materials_and_finish: str
-    build_constraints: str
-    environment_and_durability: str
+    color_palette: str
+    seams_and_construction: str
+    manufacturing_and_durability: str
     visual_direction: str
 
 

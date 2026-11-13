@@ -1,17 +1,17 @@
 export type ChatRole = 'assistant' | 'user'
 export type PrototypeBrief = {
-  product_overview: string
-  primary_user: string
-  usage_context: string
-  core_functionality: string
-  internal_components: string
-  approximate_size: string
-  form_factor_and_ergonomics: string
+  product_purpose: string
+  overall_form_and_silhouette: string
+  size_and_proportions: string
+  orientation_and_placement: string
+  handling_and_ergonomics: string
+  internal_fit_constraints: string
   controls_and_indicators: string
   ports_and_connectors: string
   materials_and_finish: string
-  build_constraints: string
-  environment_and_durability: string
+  color_palette: string
+  seams_and_construction: string
+  manufacturing_and_durability: string
   visual_direction: string
 }
 
@@ -19,10 +19,11 @@ export type DiscoveryRequest = {
   messages: { role: ChatRole; content: string }[]
   stage: string
   summary: {
-    purpose: string
-    context: string
-    internals: string
-    form: string
+    overall_form: string
+    size_and_placement: string
+    interaction_and_controls: string
+    materials_and_finish: string
+    build_constraints: string
   }
 }
 
