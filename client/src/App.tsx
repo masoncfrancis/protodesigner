@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 import { draftPrototypeBrief, generateConceptImage, sendChat } from './lib/llmClient'
@@ -9,6 +9,14 @@ type Message = {
   role: 'assistant' | 'user'
   text: string
 }
+
+type Generation = {
+  id: string
+  imageUrl: string
+  brief: PrototypeBrief
+}
+
+type VisualizerView = 'brief' | 'image' | 'history'
 
 const stages = [
   'Form',
@@ -90,11 +98,16 @@ function App() {
   const [isGeneratingImage, setIsGeneratingImage] = useState(false)
   const [visualizationError, setVisualizationError] = useState('')
   const [briefDraft, setBriefDraft] = useState<PrototypeBrief | null>(null)
-  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [briefSourceGenerationId, setBriefSourceGenerationId] = useState<string | null>(null)
+  const [generations, setGenerations] = useState<Generation[]>([])
+  const [selectedGenerationId, setSelectedGenerationId] = useState<string | null>(null)
+  const [visualizerView, setVisualizerView] = useState<VisualizerView>('brief')
+  const imageUrls = useRef<string[]>([])
 
   useEffect(() => {
-    if (imageUrl) return () => URL.revokeObjectURL(imageUrl)
-  }, [imageUrl])
+    const urls = imageUrls.current
+    return () => urls.forEach((url) => URL.revokeObjectURL(url))
+  }, [])
 
   const addMessage = async (text: string) => {
     if (!text.trim()) return
@@ -139,10 +152,11 @@ function App() {
 
   const startVisualization = async () => {
     setVisualizationOpen(true)
+    setVisualizerView('brief')
     setIsPreparingBrief(true)
     setVisualizationError('')
     setBriefDraft(null)
-    setImageUrl(null)
+    setBriefSourceGenerationId(null)
     try {
       setBriefDraft(await draftPrototypeBrief({
         messages: messages.map(({ role, text: content }) => ({ role, content })),
@@ -156,12 +170,17 @@ function App() {
     }
   }
 
-  const createConceptImage = async () => {
-    if (!briefDraft) return
+  const generateFromBrief = async (brief: PrototypeBrief) => {
     setIsGeneratingImage(true)
     setVisualizationError('')
     try {
-      setImageUrl(URL.createObjectURL(await generateConceptImage(briefDraft)))
+      const imageUrl = URL.createObjectURL(await generateConceptImage(brief))
+      imageUrls.current.push(imageUrl)
+      const generation = { id: crypto.randomUUID(), imageUrl, brief: { ...brief } }
+      setGenerations((current) => [...current, generation])
+      setSelectedGenerationId(generation.id)
+      setVisualizerView('image')
+      setBriefSourceGenerationId(null)
     } catch (requestError) {
       setVisualizationError(requestError instanceof Error ? requestError.message : 'Could not generate concept image')
     } finally {
@@ -169,7 +188,52 @@ function App() {
     }
   }
 
+  const createConceptImage = () => {
+    if (briefDraft) void generateFromBrief(briefDraft)
+  }
+
+  const openGenerationHistory = () => {
+    setVisualizationOpen(true)
+    setVisualizerView('history')
+    setVisualizationError('')
+  }
+
+  const openGeneration = (id: string) => {
+    setSelectedGenerationId(id)
+    setVisualizerView('image')
+    setVisualizationError('')
+  }
+
+  const editSelectedBrief = () => {
+    const generation = generations.find(({ id }) => id === selectedGenerationId)
+    if (!generation) return
+    setBriefDraft({ ...generation.brief })
+    setBriefSourceGenerationId(generation.id)
+    setVisualizerView('brief')
+    setVisualizationError('')
+  }
+
+  const cancelBrief = () => {
+    if (briefSourceGenerationId) {
+      setBriefDraft(null)
+      setBriefSourceGenerationId(null)
+      setVisualizerView('image')
+      setVisualizationError('')
+    } else {
+      setVisualizationOpen(false)
+      setBriefDraft(null)
+    }
+  }
+
+  const closeVisualizer = () => {
+    setVisualizationOpen(false)
+    setBriefDraft(null)
+    setBriefSourceGenerationId(null)
+  }
+
   const currentPrompt = prompts[activeStage]
+  const selectedGeneration = generations.find(({ id }) => id === selectedGenerationId)
+  const selectedGenerationNumber = generations.findIndex(({ id }) => id === selectedGenerationId) + 1
 
   return (
     <main className={`app-shell ${darkMode ? 'dark' : ''}`}>
@@ -182,6 +246,7 @@ function App() {
         <div className="top-actions">
           <button className="icon-button" type="button" aria-label="Help">?</button>
           <button className="save-button" type="button"><span className="save-dot" /> Saved</button>
+          {generations.length > 0 && <button className="history-top-button" type="button" onClick={openGenerationHistory}>History ({generations.length})</button>}
           <button className="visualize-top-button" type="button" disabled={isSending || isPreparingBrief} onClick={() => void startVisualization()}>Visualize idea <span>↗</span></button>
           <button className="theme-toggle" type="button" onClick={() => setDarkMode((current) => !current)} aria-label={`Switch to ${darkMode ? 'light' : 'dark'} mode`}>
             {darkMode ? '☼ Light' : '☾ Dark'}
@@ -265,26 +330,43 @@ function App() {
       {visualizationOpen && <div className="visualize-backdrop">
         <section className="visualize-dialog" role="dialog" aria-modal="true" aria-labelledby="visualize-title">
           <header className="visualize-dialog-header">
-            <div><p className="eyebrow">From conversation to concept</p><h2 id="visualize-title">Review your physical design brief</h2></div>
-            <button type="button" className="dialog-close" aria-label="Close" onClick={() => { setVisualizationOpen(false); setImageUrl(null) }}>×</button>
+            <div><p className="eyebrow">From conversation to concept</p><h2 id="visualize-title">{visualizerView === 'history' ? 'Generation history' : visualizerView === 'image' ? `Concept ${selectedGenerationNumber}` : 'Review your physical design brief'}</h2></div>
+            <button type="button" className="dialog-close" aria-label="Close" onClick={closeVisualizer}>×</button>
           </header>
-          <p className="visualize-intro">Check or edit what the design guide gathered. Missing details stay marked as unspecified; they won’t block image generation.</p>
-          {isPreparingBrief && <div className="visualize-loading"><span className="loading-orbit" />Preparing your brief…</div>}
-          {!isPreparingBrief && briefDraft && !imageUrl && <div className="brief-editor">
+          {visualizerView === 'brief' && <p className="visualize-intro">Check or edit what the design guide gathered. Missing details stay marked as unspecified; they won’t block image generation.</p>}
+          {visualizerView === 'history' && <div className="generation-grid">
+            {generations.map((generation, index) => <button type="button" className="generation-card" key={generation.id} onClick={() => openGeneration(generation.id)}>
+              <img src={generation.imageUrl} alt={`Generated concept ${index + 1}`} />
+              <span className="generation-card-copy"><strong>Concept {index + 1}</strong><small>{generation.brief.overall_form_and_silhouette}</small><small>{generation.brief.size_and_proportions}</small></span>
+              <span className="generation-card-arrow">→</span>
+            </button>)}
+          </div>}
+          {visualizerView === 'brief' && isPreparingBrief && <div className="visualize-loading"><span className="loading-orbit" />Preparing your brief…</div>}
+          {visualizerView === 'brief' && !isPreparingBrief && briefDraft && <div className="brief-editor">
             {briefFields.map(({ key, label }) => <label className="brief-field" key={key}>
               <span>{label}</span>
-              <textarea value={briefDraft[key]} rows={2} onChange={(event) => setBriefDraft((current) => current ? { ...current, [key]: event.target.value } : current)} />
+              <textarea disabled={isGeneratingImage} value={briefDraft[key]} rows={2} onChange={(event) => setBriefDraft((current) => current ? { ...current, [key]: event.target.value } : current)} />
             </label>)}
           </div>}
           {isGeneratingImage && <div className="visualize-loading"><span className="loading-orbit" />Generating concept image with Gemini…</div>}
-          {imageUrl && <div className="generated-image-wrap"><img src={imageUrl} alt="Generated concept for your electronic product prototype" /><p>AI-generated concept image · Use as a starting point, not a manufacturing specification.</p></div>}
+          {visualizerView === 'image' && selectedGeneration && <div className="generation-detail">
+            <div className="generated-image-wrap"><img src={selectedGeneration.imageUrl} alt={`Generated concept ${selectedGenerationNumber} for your electronic product prototype`} /><p>AI-generated concept image · Use as a starting point, not a manufacturing specification.</p></div>
+            <div className="generation-brief"><p className="eyebrow">Brief for concept {selectedGenerationNumber}</p>{briefFields.map(({ key, label }) => <div className="generation-brief-item" key={key}><span>{label}</span><p>{selectedGeneration.brief[key]}</p></div>)}</div>
+          </div>}
           {visualizationError && <p className="visualize-error" role="alert">{visualizationError}</p>}
           <footer className="visualize-footer">
-            <button type="button" className="dialog-secondary" onClick={() => { setVisualizationOpen(false); setImageUrl(null) }}>Back to chat</button>
-            {imageUrl && <a className="dialog-secondary download-image" href={imageUrl} download="protodesigner-concept.png">Download image</a>}
-            {imageUrl && <button type="button" className="dialog-secondary" onClick={() => setImageUrl(null)}>Edit brief</button>}
-            {briefDraft && <button type="button" className="dialog-primary" disabled={isPreparingBrief || isGeneratingImage} onClick={() => void createConceptImage()}>{isGeneratingImage ? 'Generating…' : imageUrl ? 'Generate another' : 'Generate concept image'} <span>→</span></button>}
-            {!briefDraft && !isPreparingBrief && <button type="button" className="dialog-primary" disabled={isPreparingBrief} onClick={() => void startVisualization()}>Retry brief <span>→</span></button>}
+            {visualizerView === 'brief' && <>
+              <button type="button" className="dialog-secondary" disabled={isGeneratingImage} onClick={cancelBrief}>{briefSourceGenerationId ? 'Cancel edits' : 'Back to chat'}</button>
+              {briefDraft && <button type="button" className="dialog-primary" disabled={isPreparingBrief || isGeneratingImage} onClick={createConceptImage}>{isGeneratingImage ? 'Generating…' : 'Generate concept image'} <span>→</span></button>}
+              {!briefDraft && !isPreparingBrief && <button type="button" className="dialog-primary" onClick={() => void startVisualization()}>Retry brief <span>→</span></button>}
+            </>}
+            {visualizerView === 'history' && <button type="button" className="dialog-secondary" onClick={closeVisualizer}>Back to chat</button>}
+            {visualizerView === 'image' && selectedGeneration && <>
+              <button type="button" className="dialog-secondary" onClick={() => setVisualizerView('history')}>Back to history</button>
+              <a className="dialog-secondary download-image" href={selectedGeneration.imageUrl} download={`protodesigner-concept-${selectedGenerationNumber}.png`}>Download image</a>
+              <button type="button" className="dialog-secondary" disabled={isGeneratingImage} onClick={editSelectedBrief}>Edit brief</button>
+              <button type="button" className="dialog-primary" disabled={isGeneratingImage} onClick={() => void generateFromBrief(selectedGeneration.brief)}>{isGeneratingImage ? 'Generating…' : 'Generate another'} <span>→</span></button>
+            </>}
           </footer>
         </section>
       </div>}
