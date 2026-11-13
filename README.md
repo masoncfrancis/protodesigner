@@ -9,7 +9,7 @@ Generated images and code are concept starting points, not validated manufacturi
 - Python 3.11 or newer
 - [uv](https://docs.astral.sh/uv/)
 - Node.js and npm (compatible with Vite 8)
-- API credentials for an OpenAI Responses API provider and Google Gemini
+- API credentials for an OpenAI Responses API-compatible provider and Google Gemini
 
 ## Configure API credentials
 
