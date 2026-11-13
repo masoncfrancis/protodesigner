@@ -70,3 +70,19 @@ export async function generateConceptImage(brief: PrototypeBrief): Promise<Blob>
   if (!image.type.startsWith('image/')) throw new Error('Server returned invalid image data')
   return image
 }
+
+export async function generateOpenScad(image: Blob, brief: PrototypeBrief): Promise<string> {
+  const form = new FormData()
+  form.append('image', image, `concept.${image.type.split('/')[1] ?? 'png'}`)
+  form.append('brief_json', JSON.stringify(brief))
+
+  const response = await fetch('/api/openscad/generate', { method: 'POST', body: form })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { detail?: string } | null
+    throw new Error(body?.detail ?? `Request failed (${response.status})`)
+  }
+
+  const body = await response.json() as { code?: string }
+  if (!body.code?.trim()) throw new Error('Gemini returned no OpenSCAD code')
+  return body.code
+}

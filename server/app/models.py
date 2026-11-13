@@ -52,3 +52,7 @@ class PrototypeBrief(BaseModel):
 
 class BriefResponse(BaseModel):
     brief: PrototypeBrief
+
+
+class OpenScadResponse(BaseModel):
+    code: str

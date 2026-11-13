@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
 from app.models import (
     BriefRequest,
@@ -7,6 +8,7 @@ from app.models import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
+    OpenScadResponse,
     PrototypeBrief,
 )
 from app.services.image_generation import (
@@ -14,6 +16,7 @@ from app.services.image_generation import (
     GeminiUpstreamError,
     generate_concept_image,
 )
+from app.services.openscad_generation import generate_openscad
 from app.services.llm import (
     LLMConfigurationError,
     LLMUpstreamError,
@@ -22,6 +25,17 @@ from app.services.llm import (
 )
 
 app = FastAPI(title="ProtoDesigner API")
+MAX_OPENSCAD_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+def _image_signature_matches(image_data: bytes, mime_type: str) -> bool:
+    if mime_type == "image/png":
+        return image_data.startswith(b"\x89PNG\r\n\x1a\n")
+    if mime_type == "image/jpeg":
+        return image_data.startswith(b"\xff\xd8\xff")
+    if mime_type == "image/webp":
+        return image_data.startswith(b"RIFF") and image_data[8:12] == b"WEBP"
+    return False
 
 app.add_middleware(
     CORSMiddleware,
@@ -73,3 +87,35 @@ async def create_concept_image(brief: PrototypeBrief) -> Response:
         media_type=mime_type,
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.post("/api/openscad/generate", response_model=OpenScadResponse)
+async def create_openscad(
+    image: UploadFile = File(...),
+    brief_json: str = Form(...),
+) -> OpenScadResponse:
+    if len(brief_json) > 20_000:
+        raise HTTPException(status_code=413, detail="Prototype brief is too large")
+    try:
+        brief = PrototypeBrief.model_validate_json(brief_json)
+    except ValidationError as error:
+        raise HTTPException(status_code=422, detail="Invalid prototype brief") from error
+
+    mime_type = image.content_type or ""
+    if mime_type not in {"image/png", "image/jpeg", "image/webp"}:
+        raise HTTPException(status_code=415, detail="Use a PNG, JPEG, or WebP concept image")
+
+    image_data = await image.read(MAX_OPENSCAD_IMAGE_BYTES + 1)
+    await image.close()
+    if len(image_data) > MAX_OPENSCAD_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Concept image exceeds 10 MB limit")
+    if not image_data or not _image_signature_matches(image_data, mime_type):
+        raise HTTPException(status_code=415, detail="Uploaded image does not match its file type")
+
+    try:
+        code = await generate_openscad(image_data, mime_type, brief)
+    except GeminiConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except GeminiUpstreamError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return OpenScadResponse(code=code)

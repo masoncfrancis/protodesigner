@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
-import { draftPrototypeBrief, generateConceptImage, sendChat } from './lib/llmClient'
+import { draftPrototypeBrief, generateConceptImage, generateOpenScad, sendChat } from './lib/llmClient'
 import type { PrototypeBrief } from './lib/llmClient'
 
 type Message = {
@@ -13,10 +13,13 @@ type Message = {
 type Generation = {
   id: string
   imageUrl: string
+  imageBlob: Blob
   brief: PrototypeBrief
+  openscadCode?: string
 }
 
 type VisualizerView = 'brief' | 'image' | 'history'
+type GenerationTab = 'brief' | 'openscad'
 
 const stages = [
   'Form',
@@ -102,6 +105,10 @@ function App() {
   const [generations, setGenerations] = useState<Generation[]>([])
   const [selectedGenerationId, setSelectedGenerationId] = useState<string | null>(null)
   const [visualizerView, setVisualizerView] = useState<VisualizerView>('brief')
+  const [generationTab, setGenerationTab] = useState<GenerationTab>('brief')
+  const [generatingOpenScadId, setGeneratingOpenScadId] = useState<string | null>(null)
+  const [openScadError, setOpenScadError] = useState('')
+  const [codeCopied, setCodeCopied] = useState(false)
   const imageUrls = useRef<string[]>([])
 
   useEffect(() => {
@@ -174,9 +181,10 @@ function App() {
     setIsGeneratingImage(true)
     setVisualizationError('')
     try {
-      const imageUrl = URL.createObjectURL(await generateConceptImage(brief))
+      const imageBlob = await generateConceptImage(brief)
+      const imageUrl = URL.createObjectURL(imageBlob)
       imageUrls.current.push(imageUrl)
-      const generation = { id: crypto.randomUUID(), imageUrl, brief: { ...brief } }
+      const generation = { id: crypto.randomUUID(), imageUrl, imageBlob, brief: { ...brief } }
       setGenerations((current) => [...current, generation])
       setSelectedGenerationId(generation.id)
       setVisualizerView('image')
@@ -201,7 +209,34 @@ function App() {
   const openGeneration = (id: string) => {
     setSelectedGenerationId(id)
     setVisualizerView('image')
+    setGenerationTab('brief')
     setVisualizationError('')
+    setOpenScadError('')
+  }
+
+  const generateOpenScadForGeneration = async (generation: Generation) => {
+    setGeneratingOpenScadId(generation.id)
+    setOpenScadError('')
+    setCodeCopied(false)
+    try {
+      const code = await generateOpenScad(generation.imageBlob, generation.brief)
+      setGenerations((current) => current.map((item) => item.id === generation.id ? { ...item, openscadCode: code } : item))
+      setGenerationTab('openscad')
+    } catch (requestError) {
+      setOpenScadError(requestError instanceof Error ? requestError.message : 'Could not generate OpenSCAD code')
+    } finally {
+      setGeneratingOpenScadId(null)
+    }
+  }
+
+  const copyOpenScad = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCodeCopied(true)
+      setOpenScadError('')
+    } catch {
+      setOpenScadError('Clipboard unavailable; download the .scad file instead.')
+    }
   }
 
   const editSelectedBrief = () => {
@@ -333,11 +368,12 @@ function App() {
             <div><p className="eyebrow">From conversation to concept</p><h2 id="visualize-title">{visualizerView === 'history' ? 'Generation history' : visualizerView === 'image' ? `Concept ${selectedGenerationNumber}` : 'Review your physical design brief'}</h2></div>
             <button type="button" className="dialog-close" aria-label="Close" onClick={closeVisualizer}>×</button>
           </header>
+          <div className={`visualize-content ${visualizerView === 'image' ? 'image-mode' : ''}`}>
           {visualizerView === 'brief' && <p className="visualize-intro">Check or edit what the design guide gathered. Missing details stay marked as unspecified; they won’t block image generation.</p>}
           {visualizerView === 'history' && <div className="generation-grid">
             {generations.map((generation, index) => <button type="button" className="generation-card" key={generation.id} onClick={() => openGeneration(generation.id)}>
               <img src={generation.imageUrl} alt={`Generated concept ${index + 1}`} />
-              <span className="generation-card-copy"><strong>Concept {index + 1}</strong><small>{generation.brief.overall_form_and_silhouette}</small><small>{generation.brief.size_and_proportions}</small></span>
+              <span className="generation-card-copy"><strong>Concept {index + 1}</strong><small>{generation.brief.overall_form_and_silhouette}</small><small>{generation.brief.size_and_proportions}</small>{generation.openscadCode && <small className="code-ready">OpenSCAD ready</small>}</span>
               <span className="generation-card-arrow">→</span>
             </button>)}
           </div>}
@@ -351,9 +387,29 @@ function App() {
           {isGeneratingImage && <div className="visualize-loading"><span className="loading-orbit" />Generating concept image with Gemini…</div>}
           {visualizerView === 'image' && selectedGeneration && <div className="generation-detail">
             <div className="generated-image-wrap"><img src={selectedGeneration.imageUrl} alt={`Generated concept ${selectedGenerationNumber} for your electronic product prototype`} /><p>AI-generated concept image · Use as a starting point, not a manufacturing specification.</p></div>
-            <div className="generation-brief"><p className="eyebrow">Brief for concept {selectedGenerationNumber}</p>{briefFields.map(({ key, label }) => <div className="generation-brief-item" key={key}><span>{label}</span><p>{selectedGeneration.brief[key]}</p></div>)}</div>
+            <div className="generation-brief">
+              <div className="generation-tabs" role="tablist" aria-label="Generation details">
+                <button type="button" role="tab" aria-selected={generationTab === 'brief'} className={generationTab === 'brief' ? 'active' : ''} onClick={() => setGenerationTab('brief')}>Brief</button>
+                {selectedGeneration.openscadCode && <button type="button" role="tab" aria-selected={generationTab === 'openscad'} className={generationTab === 'openscad' ? 'active' : ''} onClick={() => setGenerationTab('openscad')}>OpenSCAD</button>}
+              </div>
+              {generationTab === 'brief' && <>
+                <p className="eyebrow">Brief for concept {selectedGenerationNumber}</p>
+                {briefFields.map(({ key, label }) => <div className="generation-brief-item" key={key}><span>{label}</span><p>{selectedGeneration.brief[key]}</p></div>)}
+              </>}
+              {generationTab === 'openscad' && selectedGeneration.openscadCode && <>
+                <div className="code-actions">
+                  <button type="button" onClick={() => void copyOpenScad(selectedGeneration.openscadCode!)}>{codeCopied ? 'Copied' : 'Copy code'}</button>
+                  <a href={`data:text/plain;charset=utf-8,${encodeURIComponent(selectedGeneration.openscadCode)}`} download={`protodesigner-concept-${selectedGenerationNumber}.scad`}>Download .scad</a>
+                </div>
+                <pre className="openscad-code"><code>{selectedGeneration.openscadCode}</code></pre>
+                <p className="code-disclaimer">AI-generated geometry is an editable starting point, not a validated or manufacturing-ready model.</p>
+              </>}
+              {generatingOpenScadId === selectedGeneration.id && <div className="code-loading"><span className="loading-orbit" />Sending image and brief to Gemini 3.8 Flash…</div>}
+              {openScadError && <p className="visualize-error" role="alert">{openScadError}</p>}
+            </div>
           </div>}
           {visualizationError && <p className="visualize-error" role="alert">{visualizationError}</p>}
+          </div>
           <footer className="visualize-footer">
             {visualizerView === 'brief' && <>
               <button type="button" className="dialog-secondary" disabled={isGeneratingImage} onClick={cancelBrief}>{briefSourceGenerationId ? 'Cancel edits' : 'Back to chat'}</button>
@@ -365,6 +421,7 @@ function App() {
               <button type="button" className="dialog-secondary" onClick={() => setVisualizerView('history')}>Back to history</button>
               <a className="dialog-secondary download-image" href={selectedGeneration.imageUrl} download={`protodesigner-concept-${selectedGenerationNumber}.png`}>Download image</a>
               <button type="button" className="dialog-secondary" disabled={isGeneratingImage} onClick={editSelectedBrief}>Edit brief</button>
+              <button type="button" className="dialog-primary" disabled={generatingOpenScadId !== null} onClick={() => selectedGeneration.openscadCode ? setGenerationTab('openscad') : void generateOpenScadForGeneration(selectedGeneration)}>{generatingOpenScadId === selectedGeneration.id ? 'Generating code…' : selectedGeneration.openscadCode ? 'View OpenSCAD' : 'Generate OpenSCAD'} <span>→</span></button>
               <button type="button" className="dialog-primary" disabled={isGeneratingImage} onClick={() => void generateFromBrief(selectedGeneration.brief)}>{isGeneratingImage ? 'Generating…' : 'Generate another'} <span>→</span></button>
             </>}
           </footer>
