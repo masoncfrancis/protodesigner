@@ -17,14 +17,10 @@ Create `server/.env` and set provider credentials and the required OpenAI model:
 
 ```dotenv
 OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=your_responses_api_model
+OPENAI_MODEL=your_responses_api_model # we used gpt-6-luna in testing
 
 GEMINI_API_KEY=your_gemini_api_key
-```
 
-Optional settings:
-
-```dotenv
 # Defaults to https://api.openai.com/v1
 OPENAI_BASE_URL=https://api.openai.com/v1
 
